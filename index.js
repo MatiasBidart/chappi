@@ -1,18 +1,19 @@
 require('dotenv').config();
 const express = require('express');
-const bodyParser = require('body-parser');
 const axios = require('axios');
 
 const app = express();
-app.use(bodyParser.json());
+app.use(express.json());
 
-// 👉 Verificación inicial de Webhook (GET)
+// Verificación del webhook
 app.get('/webhook', (req, res) => {
+  const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
+
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
   const challenge = req.query['hub.challenge'];
 
-  if (mode === 'subscribe' && token === process.env.VERIFY_TOKEN) {
+  if (mode && token && mode === 'subscribe' && token === VERIFY_TOKEN) {
     console.log('✅ Webhook verificado');
     res.status(200).send(challenge);
   } else {
@@ -20,43 +21,58 @@ app.get('/webhook', (req, res) => {
   }
 });
 
-// 👉 Lógica principal del bot (POST)
+// Recepción de mensajes
 app.post('/webhook', async (req, res) => {
-  const entry = req.body.entry?.[0];
-  const changes = entry?.changes?.[0];
-  const message = changes?.value?.messages?.[0];
+  try {
+    const body = req.body;
 
-  if (message) {
-    const from = message.from; // Número del usuario
-    const text = message.text?.body;
+    // Confirma que sea un mensaje entrante
+    if (body.object) {
+      const entry = body.entry?.[0];
+      const change = entry?.changes?.[0];
+      const value = change?.value;
+      const message = value?.messages?.[0];
 
-    // 🧠 Tu lógica básica
-    let response = 'No entendí tu mensaje 😅';
-    if (/hola/i.test(text)) response = '¡Hola! ¿Cómo estás? 🤖';
-    if (/gracias/i.test(text)) response = '¡De nada! 😊';
-    if (/chau|adiós/i.test(text)) response = '¡Hasta luego! 👋';
+      if (message) {
+        const from = message.from; // número del usuario
+        const text = message.text?.body; // mensaje recibido
 
-    // 👉 Enviar respuesta
-    await axios.post(
-      `https://graph.facebook.com/v17.0/${process.env.PHONE_NUMBER_ID}/messages`,
-      {
-        messaging_product: 'whatsapp',
-        to: from,
-        text: { body: response }
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
-          'Content-Type': 'application/json'
-        }
+        console.log(`📩 Mensaje recibido de ${from}: ${text}`);
+
+        // lógica de respuesta
+        let response = 'No entendí tu mensaje 😅';
+        if (/hola/i.test(text)) response = '¡Hola! ¿Cómo estás? 🤖';
+        if (/gracias/i.test(text)) response = '¡De nada! 😊';
+        if (/chau|adiós/i.test(text)) response = '¡Hasta luego! 👋';
+
+        // respuesta con axios — CORREGIDA
+        await axios.post(
+          `https://graph.facebook.com/v17.0/${process.env.PHONE_NUMBER_ID}/messages`,
+          {
+            messaging_product: 'whatsapp',
+            to: from,
+            type: 'text', // 👈 MUY IMPORTANTE
+            text: { body: response }
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
+              'Content-Type': 'application/json'
+            }
+          }
+        );
+        console.log('✅ Mensaje enviado correctamente');
       }
-    );
+
+      res.sendStatus(200);
+    } else {
+      res.sendStatus(404);
+    }
+  } catch (error) {
+    console.error('❌ Error al responder:', error?.response?.data || error.message);
+    res.sendStatus(500);
   }
-
-  res.sendStatus(200);
 });
 
-// 👉 Arranca el servidor
-app.listen(process.env.PORT, () => {
-  console.log(`🚀 Bot escuchando en http://localhost:${process.env.PORT}`);
-});
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`🚀 Bot escuchando en http://localhost:${PORT}`));
